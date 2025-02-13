@@ -10,44 +10,74 @@ import (
 
 // Criar um novo burger
 func CreateBurger(c echo.Context) error {
-	var burger models.Burger
+	var input struct {
+		Nome        string `json:"nome"`
+		CarneID     uint   `json:"carne_id"`
+		PaoID       uint   `json:"pao_id"`
+		OpcionalIDs []uint `json:"opcionais"`
+	}
 	db := database.GetDB()
 
 	// Bind para associar os dados da requisição ao struct
-	if err := c.Bind(&burger); err != nil {
+	if err := c.Bind(&input); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Dados inválidos"})
 	}
 
-	if !isValidCarne(burger.Carne) {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Carne inválida"})
+	// Verificar se a carne existe
+	var carne models.Carne
+	if err := db.First(&carne, input.CarneID).Error; err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Carne não encontrada"})
 	}
 
-	if !isValidPao(burger.Pao) {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Pão inválido"})
+	// Verificar se o pão existe
+	var pao models.Pao
+	if err := db.First(&pao, input.PaoID).Error; err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Pão não encontrado"})
 	}
 
-	burger.Status = "Solicitado"
+	// Buscar os opcionais com base nos IDs
+	var opcionais []models.Opcional
+	if len(input.OpcionalIDs) > 0 {
+		if err := db.Where("id IN ?", input.OpcionalIDs).Find(&opcionais).Error; err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Erro ao buscar opcionais"})
+		}
+	}
 
-	if burger.Opcionais == nil {
-		burger.Opcionais = []string{}
+	// Definir o status como "Solicitado"
+	var status models.Status
+	if err := db.Where("tipo = ?", "Solicitado").First(&status).Error; err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Erro ao definir o status"})
+	}
+
+	// Criar o burger no banco
+	burger := models.Burger{
+		Nome:      input.Nome,
+		CarneID:   input.CarneID,
+		PaoID:     input.PaoID,
+		Opcionais: opcionais, // Associa os opcionais corretamente
+		StatusID:  status.ID,
 	}
 
 	if err := db.Create(&burger).Error; err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erro ao criar burger"})
 	}
+
+	// Atualizar resposta com dados completos
+	burger.Carne = carne
+	burger.Pao = pao
+	burger.Status = status
+
 	return c.JSON(http.StatusCreated, burger)
 }
 
-func isValidCarne(carne string) bool {
-	return carne == models.CarneMaminha || carne == models.CarneAlcatra || carne == models.CarnePicanha || carne == models.CarneVeggie
-}
-
-func isValidPao(pao string) bool {
-	return pao == models.PaoIntegral || pao == models.PaoItalianoBranco || pao == models.PaoTresQueijos || pao == models.PaoParmesaoEOregano
-}
-
 func isValidStatus(status string) bool {
-	return status == "Solicitado" || status == "Em produção" || status == "Finalizado"
+	validStatuses := []string{"Solicitado", "Em produção", "Finalizado"}
+	for _, valid := range validStatuses {
+		if status == valid {
+			return true
+		}
+	}
+	return false
 }
 
 func GetBurgers(c echo.Context) error {
@@ -100,13 +130,12 @@ func DeleteBurger(c echo.Context) error {
 }
 
 // Listar ingredientes
-
 func GetIngredientes(c echo.Context) error {
 	db := database.GetDB()
 
 	var paes []models.Pao
 	var carnes []models.Carne
-	var opcionais []models.Ingrediente
+	var opcionais []models.Opcional // Usei o tipo correto, que é 'Opcional'
 
 	// Buscar pães
 	if err := db.Find(&paes).Error; err != nil {
@@ -123,12 +152,39 @@ func GetIngredientes(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erro ao consultar opcionais"})
 	}
 
-	// Retornar os ingredientes no formato esperado
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"paes":      paes,
-		"carnes":    carnes,
-		"opcionais": opcionais,
-	})
+	// Estrutura do JSON final
+	response := map[string]interface{}{
+		"carnes":    []interface{}{}, // Lista de carnes
+		"opcionais": []interface{}{}, // Lista de opcionais
+		"paes":      []interface{}{}, // Lista de pães
+	}
+
+	// Preencher com os dados de carnes
+	for _, carne := range carnes {
+		response["carnes"] = append(response["carnes"].([]interface{}), map[string]interface{}{
+			"id":   carne.ID,
+			"tipo": carne.Tipo,
+		})
+	}
+
+	// Preencher com os dados de pães
+	for _, pao := range paes {
+		response["paes"] = append(response["paes"].([]interface{}), map[string]interface{}{
+			"id":   pao.ID,
+			"tipo": pao.Tipo,
+		})
+	}
+
+	// Preencher com os dados de opcionais
+	for _, opcional := range opcionais {
+		response["opcionais"] = append(response["opcionais"].([]interface{}), map[string]interface{}{
+			"id":   opcional.ID,
+			"tipo": opcional.Tipo, // Acessando o campo 'Tipo' da struct Opcional
+		})
+	}
+
+	// Retornar a resposta no formato esperado
+	return c.JSON(http.StatusOK, response)
 }
 
 // Listar pães

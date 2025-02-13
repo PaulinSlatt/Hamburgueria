@@ -6,15 +6,13 @@ import (
 	"errors"
 )
 
-// Criar um tipo customizado para lidar com JSONB no GORM
+// Tipo customizado para lidar com JSONB
 type StringArray []string
 
-// Converter para JSON ao salvar no banco
 func (s StringArray) Value() (driver.Value, error) {
 	return json.Marshal(s)
 }
 
-// Converter JSON para o struct ao recuperar do banco
 func (s *StringArray) Scan(value interface{}) error {
 	bytes, ok := value.([]byte)
 	if !ok {
@@ -23,54 +21,46 @@ func (s *StringArray) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, s)
 }
 
-const (
-	CarneMaminha = "Maminha"
-	CarneAlcatra = "Alcatra"
-	CarnePicanha = "Picanha"
-	CarneVeggie  = "Veggie Burger"
-)
-
-const (
-	PaoIntegral         = "Integral"
-	PaoItalianoBranco   = "Italiano Branco"
-	PaoTresQueijos      = "3 Queijos"
-	PaoParmesaoEOregano = "Parmesão e Oregano"
-)
-
-const (
-	OpcionalBacon      = "Bacon"
-	OpcionalSalame     = "Salame"
-	OpcionalCebolaRoxa = "Cebola Roxa"
-	OpcionalCheddar    = "Cheddar"
-	OpcionalTomate     = "Tomate"
-	OpcionalPepino     = "Pepino"
-)
-
-type Burger struct {
-	ID        uint        `json:"id" gorm:"primaryKey"`
-	Nome      string      `json:"nome"`
-	Carne     string      `json:"carne"`
-	Pao       string      `json:"pao"`
-	Opcionais StringArray `json:"opcionais" gorm:"type:jsonb"`
-	Status    string      `json:"status"`
-}
-
-type Ingrediente struct {
-	ID   uint   `json:"id"`
-	Nome string `json:"nome"`
-}
-
 type Pao struct {
 	ID   uint   `json:"id"`
-	Nome string `json:"nome"`
+	Tipo string `json:"tipo"`
 }
 
 type Carne struct {
 	ID   uint   `json:"id"`
-	Nome string `json:"nome"`
+	Tipo string `json:"tipo"`
 }
 
-type Status struct {
+type Opcional struct {
 	ID   uint   `json:"id"`
-	Nome string `json:"nome"`
+	Tipo string `json:"tipo"`
+}
+
+type Ingrediente struct {
+	ID         uint       `json:"id"`
+	PaoID      uint       `json:"pao_id"`
+	Pao        *Pao       `json:"pao,omitempty"`
+	CarneID    uint       `json:"carne_id"`
+	Carne      *Carne     `json:"carne,omitempty"`
+	Opicionais []Opcional `json:"opcionais,omitempty" gorm:"many2many:ingredientes_opcionais;"`
+}
+
+// Status de um Burger
+
+type Status struct {
+	ID   uint   `json:"id" gorm:"primaryKey"`
+	Tipo string `json:"tipo" gorm:"unique;not null"`
+}
+
+// Burger com relacionamentos
+type Burger struct {
+	ID        uint       `json:"id" gorm:"primaryKey"`
+	Nome      string     `json:"nome"`
+	CarneID   uint       `json:"carne_id" gorm:"not null"` // Chave estrangeira oculta no JSON
+	Carne     Carne      `json:"carne" gorm:"foreignKey:CarneID"`
+	PaoID     uint       `json:"pao_id" gorm:"not null"` // Chave estrangeira oculta no JSON
+	Pao       Pao        `json:"pao" gorm:"foreignKey:PaoID"`
+	Opcionais []Opcional `json:"opcionais" gorm:"many2many:burger_opcionais;"`
+	StatusID  uint       `json:"status_id" gorm:"not null"` // Chave estrangeira oculta no JSON
+	Status    Status     `json:"status" gorm:"foreignKey:StatusID"`
 }
