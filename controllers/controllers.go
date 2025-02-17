@@ -3,6 +3,7 @@ package controllers
 import (
 	"GoEcho/database"
 	"GoEcho/models"
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -10,63 +11,59 @@ import (
 
 // Criar um novo burger
 func CreateBurger(c echo.Context) error {
-	var input struct {
-		Nome        string `json:"nome"`
-		CarneID     uint   `json:"carne_id"`
-		PaoID       uint   `json:"pao_id"`
-		OpcionalIDs []uint `json:"opcionais"`
-	}
+	var burger models.Burger
 	db := database.GetDB()
 
-	// Bind para associar os dados da requisição ao struct
-	if err := c.Bind(&input); err != nil {
+	// 🔹 Bind do JSON
+	if err := c.Bind(&burger); err != nil {
+		fmt.Println("Erro ao bindar JSON:", err)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Dados inválidos"})
 	}
 
-	// Verificar se a carne existe
+	// 🔹 Buscar a carne
 	var carne models.Carne
-	if err := db.First(&carne, input.CarneID).Error; err != nil {
+	if err := db.First(&carne, burger.CarneID).Error; err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Carne não encontrada"})
 	}
+	burger.CarneNome = carne.Tipo
 
-	// Verificar se o pão existe
+	// 🔹 Buscar o pão
 	var pao models.Pao
-	if err := db.First(&pao, input.PaoID).Error; err != nil {
+	if err := db.First(&pao, burger.PaoID).Error; err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Pão não encontrado"})
 	}
+	burger.PaoNome = pao.Tipo
 
-	// Buscar os opcionais com base nos IDs
+	// 🔹 Buscar os opcionais corretamente
 	var opcionais []models.Opcional
-	if len(input.OpcionalIDs) > 0 {
-		if err := db.Where("id IN ?", input.OpcionalIDs).Find(&opcionais).Error; err != nil {
+	if len(burger.Opcionais) > 0 {
+		var opcionalIDs []uint
+		for _, opcional := range burger.Opcionais {
+			opcionalIDs = append(opcionalIDs, opcional.ID)
+		}
+
+		if err := db.Where("id IN ?", opcionalIDs).Find(&opcionais).Error; err != nil {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "Erro ao buscar opcionais"})
 		}
+
+		burger.Opcionais = opcionais // Associa os opcionais encontrados
 	}
 
-	// Definir o status como "Solicitado"
+	// 🔹 Definir status automaticamente
 	var status models.Status
 	if err := db.Where("tipo = ?", "Solicitado").First(&status).Error; err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Erro ao definir o status"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erro ao definir status"})
 	}
+	burger.StatusID = status.ID
+	burger.StatusNome = status.Tipo
 
-	// Criar o burger no banco
-	burger := models.Burger{
-		Nome:      input.Nome,
-		CarneID:   input.CarneID,
-		PaoID:     input.PaoID,
-		Opcionais: opcionais, // Associa os opcionais corretamente
-		StatusID:  status.ID,
-	}
-
+	// 🔹 Criar o burger no banco de dados
 	if err := db.Create(&burger).Error; err != nil {
+		fmt.Println("Erro ao salvar no banco:", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erro ao criar burger"})
 	}
 
-	// Atualizar resposta com dados completos
-	burger.Carne = carne
-	burger.Pao = pao
-	burger.Status = status
-
+	// 🔹 Retornar o burger criado, incluindo os opcionais
 	return c.JSON(http.StatusCreated, burger)
 }
 
@@ -100,8 +97,15 @@ func UpdateBurgerStatus(c echo.Context) error {
 		Status string `json:"status"`
 	}
 
-	if err := c.Bind(&input); err != nil || !isValidStatus(input.Status) {
+	// Bind e validação do JSON
+	if err := c.Bind(&input); err != nil || input.Status == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Status inválido"})
+	}
+
+	// Buscar o status pelo nome
+	var status models.Status
+	if err := db.Where("tipo = ?", input.Status).First(&status).Error; err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Status não encontrado"})
 	}
 
 	// Verificar se o burger existe
@@ -110,8 +114,11 @@ func UpdateBurgerStatus(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "Burger não encontrado"})
 	}
 
-	// Atualizar apenas o campo Status
-	if err := db.Model(&burger).Update("status", input.Status).Error; err != nil {
+	// Atualizar o status no banco de dados
+	if err := db.Model(&burger).Updates(map[string]interface{}{
+		"status_id":   status.ID,
+		"status_nome": status.Tipo,
+	}).Error; err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erro ao atualizar burger"})
 	}
 
@@ -122,8 +129,20 @@ func DeleteBurger(c echo.Context) error {
 	id := c.Param("id")
 	db := database.GetDB()
 
+	// Verificar se o burger existe antes de tentar desvincular os opcionais
+	var burger models.Burger
+	if err := db.First(&burger, id).Error; err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "Burger não encontrado"})
+	}
+
+	// Tentar desvincular os opcionais do burger
+	if err := db.Model(&burger).Association("Opcionais").Clear(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erro ao desvincular opcionais: " + err.Error()})
+	}
+
+	// Agora, excluir o burger
 	if err := db.Delete(&models.Burger{}, id).Error; err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erro ao deletar burger"})
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erro ao deletar burger: " + err.Error()})
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "Burger deletado com sucesso"})

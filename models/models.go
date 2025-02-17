@@ -39,10 +39,10 @@ type Opcional struct {
 type Ingrediente struct {
 	ID         uint       `json:"id"`
 	PaoID      uint       `json:"pao_id"`
-	Pao        *Pao       `json:"pao,omitempty"`
+	PaoNome    string     `json:"pao_nome"`
 	CarneID    uint       `json:"carne_id"`
-	Carne      *Carne     `json:"carne,omitempty"`
-	Opicionais []Opcional `json:"opcionais,omitempty" gorm:"many2many:ingredientes_opcionais;"`
+	CarneNome  string     `json:"carne_nome"`
+	Opicionais []Opcional `gorm:"many2many:ingredientes_opcionais;"` // associação many-to-many
 }
 
 // Status de um Burger
@@ -54,13 +54,21 @@ type Status struct {
 
 // Burger com relacionamentos
 type Burger struct {
-	ID        uint       `json:"id" gorm:"primaryKey"`
-	Nome      string     `json:"nome"`
-	CarneID   uint       `json:"carne_id" gorm:"not null"` // Chave estrangeira oculta no JSON
-	Carne     Carne      `json:"carne" gorm:"foreignKey:CarneID"`
-	PaoID     uint       `json:"pao_id" gorm:"not null"` // Chave estrangeira oculta no JSON
-	Pao       Pao        `json:"pao" gorm:"foreignKey:PaoID"`
-	Opcionais []Opcional `json:"opcionais" gorm:"many2many:burger_opcionais;"`
-	StatusID  uint       `json:"status_id" gorm:"not null"` // Chave estrangeira oculta no JSON
-	Status    Status     `json:"status" gorm:"foreignKey:StatusID"`
+	ID   uint   `json:"id" gorm:"primaryKey"`
+	Nome string `json:"nome"`
+
+	CarneID   uint   `json:"carne_id"`
+	CarneNome string `json:"carne_nome"`
+
+	PaoID   uint   `json:"pao_id"`
+	PaoNome string `json:"pao_nome"`
+
+	Opcionais  []Opcional `json:"opcionais" gorm:"many2many:burger_opcionais;"` // Agora visível no JSON
+	StatusID   uint       `json:"status_id"`
+	StatusNome string     `json:"status_nome"`
+}
+
+type BurgerOpcional struct {
+	BurgerID   uint `json:"burger_id"`
+	OpcionalID uint `json:"opcional_id"`
 }
